@@ -1,0 +1,485 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI Chat Interface</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='cover.css') }}">
+  <style>
+    /* KEEP OLD STYLES */
+    .sidebar { width: 260px; background: rgba(0,0,0,0.75); color: white; position: fixed; top: 0; left: 0; height: 100%; display: flex; flex-direction: column; padding: 20px; }
+    .sidebar h2 { font-size: 1.4rem; margin-bottom: 20px; }
+    .sidebar a, .sidebar button { display: block; text-decoration: none; background: #10a37f; border: none; padding: 10px; margin-bottom: 15px; color: white; font-size: 1rem; border-radius: 6px; cursor: pointer; transition: background 0.3s; text-align: center; }
+    .sidebar a:hover, .sidebar button:hover { background: #0d8c6c; }
+    .sidebar .menu { margin-top: 20px; flex-grow: 1; }
+    .sidebar .menu a { display: block; margin: 10px 0; color: white; text-decoration: none; font-size: 1rem; transition: color 0.3s; }
+    .sidebar .menu a:hover { color: #10a37f; }
+
+    .chat-container { margin-left: 260px; height: 100vh; display: flex; flex-direction: column; background: rgba(255,255,255,0.05); }
+    .chat-window { flex: 1; padding: 20px; overflow-y: auto; }
+    .message { max-width: 70%; padding: 12px; border-radius: 12px; margin-bottom: 12px; line-height: 1.4; }
+    .user-msg { background: #10a37f; color: white; margin-left: auto; }
+    .ai-msg { background: #2d2d2d; color: white; margin-right: auto; }
+
+    .input-area { display: flex; justify-content: center; align-items: center; gap: 12px; padding: 20px; border-top: 1px solid rgba(255,255,255,0.2); background: rgba(0,0,0,0.6); }
+    .input-area input[type="file"] { display: none; }
+    .custom-file-label { background: rgba(255,255,255,0.15); padding: 12px 20px; border-radius: 8px; color: white; cursor: pointer; transition: all 0.3s; }
+    .custom-file-label:hover { background: #10a37f; transform: scale(1.05); box-shadow: 0 0 15px rgba(16,163,127,0.7); }
+    .input-area button { background: #10a37f; border: none; padding: 12px 24px; border-radius: 8px; color: white; cursor: pointer; transition: all 0.3s; }
+    .input-area button:hover { background: #0d8c6c; transform: scale(1.05); box-shadow: 0 0 15px rgba(16,163,127,0.7); }
+
+    #loading-message { text-align: center; color: #fff; margin: 10px; font-weight: bold; display: none; }
+
+    video.bg-video { position: fixed; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; z-index: -1; }
+
+    /* Extra small additions */
+    .mini-controls {
+      position: absolute;
+      right: 24px;
+      top: 24px;
+      background: rgba(0,0,0,0.45);
+      padding: 10px;
+      border-radius: 8px;
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      z-index: 5;
+      backdrop-filter: blur(4px);
+    }
+    .mini-controls button {
+      background: rgba(255,255,255,0.08);
+      color: #fff;
+      border: 1px solid rgba(255,255,255,0.06);
+      padding: 6px 10px;
+      border-radius: 6px;
+      cursor: pointer;
+    }
+    .mini-controls .sos { background: linear-gradient(90deg,#ff4b4b,#ff2b2b); }
+    .mini-controls .voice { background: linear-gradient(90deg,#2b9fff,#0066ff); }
+  </style>
+</head>
+<body>
+  <!-- Background Video -->
+  <video autoplay loop muted playsinline class="bg-video">
+    <source src="{{ url_for('static', filename='cover.mp4') }}" type="video/mp4">
+  </video>
+
+  <!-- Sidebar -->
+  <div class="sidebar">
+    <h2>AI Assistant</h2>
+    <a href="{{ url_for('newchat_page') }}">+ New Chat</a>
+    <div class="menu">
+      <a href="{{ url_for('search_page') }}">🔍 Search</a>
+      <a href="{{ url_for('history_page') }}">📜 History</a>
+      <a href="{{ url_for('settings_page') }}">⚙️ Settings</a>
+    </div>
+  </div>
+
+  <!-- Chat Area -->
+  <div class="chat-container" id="chat-container" style="position:relative;">
+    <div class="chat-window" id="chat-window">
+      <div class="ai-msg message">👋 Welcome! Upload an image and let’s start.</div>
+      <div id="loading-message">⏳ Please wait, processing your image...</div>
+    </div>
+
+    <!-- Input Area -->
+    <form class="input-area" action="/predict" method="post" enctype="multipart/form-data" onsubmit="showLoading()">
+      <label for="file-upload" class="custom-file-label">📂 Choose Image</label>
+      <input id="file-upload" type="file" name="file" accept="image/*" required onchange="fileChosen()">
+      <select name="lang" id="lang-select" style="background:rgba(255,255,255,0.08); color:#ff0000; border-radius:6px; padding:8px;">
+        <option value="en">English</option>
+        <option value="urdu">Urdu</option>
+        <option value="hi">Hindi</option>
+        <option value="ar">Arabic</option>
+      </select>
+      <button type="submit">Send</button>
+      <button type="button" class="voice-btn" onclick="toggleVoiceMode()">🎤 Voice</button>
+      <button type="button" class="sos-btn" onclick="triggerSOS()">SOS</button>
+    </form>
+
+    <!-- Quick Phrases -->
+    <div class="mini-controls">
+      <button onclick="speakText('Hello')">Hello</button>
+      <button onclick="speakText('I need help')">I need help</button>
+      <button onclick="speakText('Call my family')">Call family</button>
+      <button onclick="speakText('Where is washroom?')">Washroom?</button>
+    </div>
+  </div>
+
+  <script>
+    // Language-specific welcome and help
+    function getWelcomeMessage(lang) {
+      switch (lang) {
+        case 'urdu':
+          return "خوش آمدید! براہ کرم تصویر منتخب کریں یا کوئی کمانڈ بولیں۔";
+        case 'hi':
+          return "स्वागत है! कृपया एक छवि चुनें या कोई कमांड बोलें।";
+        case 'ar':
+          return "مرحبًا! يرجى اختيار صورة أو قول أمر ما.";
+        default:
+          return "Welcome! Please choose an image or say a command.";
+      }
+    }
+    function getHelpMessage(lang) {
+      switch (lang) {
+        case 'urdu':
+          return "آپ کہہ سکتے ہیں: تصویر منتخب کریں، بھیجیں، ایس او ایس، یا کوئی اور کمانڈ۔";
+        case 'hi':
+          return "आप कह सकते हैं: छवि चुनें, भेजें, एसओएस, या कोई अन्य कमांड।";
+        case 'ar':
+          return "يمكنك أن تقول: اختر صورة، أرسل، إس أو إس، أو أي أمر آخر.";
+        default:
+          return "You can say: choose image, send, SOS, or any other command.";
+      }
+    }
+
+    // Always speak in selected language
+    function speakText(text) {
+      const select = document.getElementById('lang-select');
+      const lang = (select && select.value) ? select.value : 'en';
+      const speech = new SpeechSynthesisUtterance(text);
+      speech.lang = (lang === 'urdu') ? 'ur-PK' : (lang === 'hi') ? 'hi-IN' : (lang === 'ar') ? 'ar-SA' : 'en-US';
+      try {
+        window.speechSynthesis.cancel();
+        window.speechSynthesis.speak(speech);
+      } catch (e) { console.warn('SpeechSynthesis error', e); }
+    }
+
+    /* ================= Hover Voice ================= */
+    document.addEventListener("DOMContentLoaded", function(){
+      document.querySelectorAll("button, a, label, select, h2, .ai-msg, .user-msg").forEach(el=>{
+        el.addEventListener("mouseenter", ()=>{
+          const text = el.innerText || el.getAttribute("aria-label") || "";
+          if(text) speakText(text);
+        });
+      });
+    });
+
+    /* ================= File Functions ================= */
+    function fileChosen() {
+      document.getElementById("loading-message").style.display = "block";
+      speakText("Image selected, now click send to process");
+    }
+    function showLoading() {
+      document.getElementById("loading-message").style.display = "block";
+      speakText("Wait, processing your image");
+    }
+
+    // Helper: click element by visible text (button, label, a)
+    function clickByText(text) {
+      text = text.trim().toLowerCase();
+      // Try buttons
+      let btns = Array.from(document.querySelectorAll('button, input[type="button"], input[type="submit"]'));
+      for (let btn of btns) {
+        if ((btn.innerText && btn.innerText.trim().toLowerCase() === text) ||
+            (btn.value && btn.value.trim().toLowerCase() === text) ||
+            (btn.getAttribute('aria-label') && btn.getAttribute('aria-label').trim().toLowerCase() === text)) {
+          btn.click();
+          return true;
+        }
+      }
+      // Try labels
+      let labels = Array.from(document.querySelectorAll('label'));
+      for (let lbl of labels) {
+        if ((lbl.innerText && lbl.innerText.trim().toLowerCase() === text) ||
+            (lbl.getAttribute('aria-label') && lbl.getAttribute('aria-label').trim().toLowerCase() === text)) {
+          lbl.click();
+          return true;
+        }
+      }
+      // Try links
+      let links = Array.from(document.querySelectorAll('a'));
+      for (let a of links) {
+        if ((a.innerText && a.innerText.trim().toLowerCase() === text) ||
+            (a.getAttribute('aria-label') && a.getAttribute('aria-label').trim().toLowerCase() === text)) {
+          a.click();
+          return true;
+        }
+      }
+      return false;
+    }
+
+    // Helper: map commands to actions
+    const voiceActions = [
+      {
+        keywords: ['choose image', 'select image', 'upload image', 'open image'],
+        action: () => {
+          promptImagePicker();
+        }
+      },
+      {
+        keywords: ['send', 'submit', 'process'],
+        action: () => {
+          document.querySelector('.input-area').requestSubmit
+            ? document.querySelector('.input-area').requestSubmit()
+            : document.querySelector('.input-area').submit();
+          speakText('Sending your image for processing.');
+        }
+      },
+      {
+        keywords: ['sos', 'emergency'],
+        action: () => {
+          triggerSOS();
+          speakText('SOS triggered.');
+        }
+      },
+      {
+        keywords: ['voice off', 'turn off voice', 'stop voice'],
+        action: () => {
+          toggleVoiceMode();
+          speakText('Voice mode turned off.');
+        }
+      },
+      {
+        keywords: ['voice on', 'turn on voice', 'start voice'],
+        action: () => {
+          if (!voiceModeOn) toggleVoiceMode();
+          speakText('Voice mode turned on.');
+        }
+      },
+      {
+        keywords: ['new chat', 'start new chat'],
+        action: () => {
+          window.location.href = "{{ url_for('newchat_page') }}";
+          speakText('Starting a new chat.');
+        }
+      },
+      {
+        keywords: ['search'],
+        action: () => {
+          window.location.href = "{{ url_for('search_page') }}";
+          speakText('Opening search page.');
+        }
+      },
+      {
+        keywords: ['history'],
+        action: () => {
+          window.location.href = "{{ url_for('history_page') }}";
+          speakText('Opening history page.');
+        }
+      },
+      {
+        keywords: ['settings', 'setting'],
+        action: () => {
+          window.location.href = "{{ url_for('settings_page') }}";
+          speakText('Opening settings page.');
+        }
+      },
+      {
+        keywords: ['hello'],
+        action: () => {
+          speakText('Hello! How can I assist you?');
+        }
+      },
+      {
+        keywords: ['i need help', 'help'],
+        action: () => {
+          speakText('Do you need SOS help? Say SOS to trigger emergency.');
+        }
+      },
+      {
+        keywords: ['call my family', 'call family'],
+        action: () => {
+          speakText('Calling your family.');
+        }
+      },
+      {
+        keywords: ['where is washroom', 'washroom'],
+        action: () => {
+          speakText('Washroom is on your right side.');
+        }
+      },
+      // Add more quick phrases as needed
+    ];
+
+    // Helper: language switching
+    const langMap = {
+      'urdu': 'urdu',
+      'hindi': 'hi',
+      'arabic': 'ar',
+      'english': 'en'
+    };
+
+    // Listen for language change and greet in new language
+    document.addEventListener("DOMContentLoaded", function() {
+      // ...existing code...
+      document.getElementById('lang-select').addEventListener('change', function() {
+        const lang = this.value;
+        speakText(getWelcomeMessage(lang) + " " + getHelpMessage(lang));
+      });
+    });
+
+    function handleVoiceCommand(spoken) {
+      // Language switching
+      for (const key in langMap) {
+        if (spoken.includes(key)) {
+          document.getElementById('lang-select').value = langMap[key];
+          const lang = langMap[key];
+          speakText(getWelcomeMessage(lang) + " " + getHelpMessage(lang));
+          return true;
+        }
+      }
+      // Robust match for any "choose image" related phrase
+      const chooseImagePattern = /(choose|select|upload|open|click).*(image|photo|picture)/i;
+      if (chooseImagePattern.test(spoken)) {
+        promptImagePicker();
+        return true;
+      }
+      // Generic "click"/"open"/"press" command for any button, label, or link
+      let clickMatch = spoken.match(/^(click|open|press)\s+(.+)/i);
+      if (clickMatch) {
+        let target = clickMatch[2].trim().toLowerCase();
+        if (target.includes('choose image') || target.includes('select image') || target.includes('upload image')) {
+          promptImagePicker();
+          return true;
+        }
+        // Try to click by text
+        if (clickByText(target)) {
+          speakText('Clicked ' + target);
+          return true;
+        } else {
+          speakText('Could not find ' + target + ' to click.');
+          return false;
+        }
+      }
+      // Try all actions
+      for (const act of voiceActions) {
+        for (const kw of act.keywords) {
+          if (spoken.includes(kw)) {
+            act.action();
+            return true;
+          }
+        }
+      }
+      return false;
+    }
+
+    /* ================= Continuous Voice Mode ================= */
+    let recognition;
+    let voiceModeOn = false;
+
+    function toggleVoiceMode(){
+      if(voiceModeOn){
+        recognition && recognition.stop();
+        voiceModeOn = false;
+        speakText(getHelpMessage(document.getElementById('lang-select').value) + " Voice mode turned off.");
+        return;
+      }
+      if(!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)){
+        alert('Voice commands not supported on this browser.');
+        return;
+      }
+      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+      recognition = new SpeechRecognition();
+      recognition.lang = (document.getElementById('lang-select').value === 'urdu') ? 'ur-PK'
+                        : (document.getElementById('lang-select').value === 'hi') ? 'hi-IN'
+                        : (document.getElementById('lang-select').value === 'ar') ? 'ar-SA'
+                        : 'en-US';
+      recognition.interimResults = false;
+      recognition.continuous = true;
+
+      recognition.onstart = ()=> {
+        voiceModeOn = true;
+        const lang = document.getElementById('lang-select').value;
+        speakText(getWelcomeMessage(lang) + " " + getHelpMessage(lang));
+      };
+      recognition.onresult = (evt) => {
+        const spoken = evt.results[evt.results.length-1][0].transcript.toLowerCase().trim();
+        // Voice off command (in all supported languages)
+        if (
+          spoken.includes('voice off') || spoken.includes('turn off voice') || spoken.includes('stop voice') ||
+          spoken.includes('آواز بند کریں') || spoken.includes('آواز بند') ||
+          spoken.includes('आवाज़ बंद करें') || spoken.includes('आवाज बंद') ||
+          spoken.includes('إيقاف الصوت') || spoken.includes('أوقف الصوت')
+        ) {
+          recognition && recognition.stop();
+          voiceModeOn = false;
+          speakText(getHelpMessage(document.getElementById('lang-select').value) + " Voice mode turned off.");
+          return;
+        }
+        // Try to handle command
+        if (!handleVoiceCommand(spoken)) {
+          // If not handled, repeat back and apologize in selected language
+          const lang = document.getElementById('lang-select').value;
+          let sorry = {
+            'urdu': "معذرت، میں سمجھ نہیں سکا۔ دوبارہ کوشش کریں۔",
+            'hi': "माफ़ कीजिए, मैं समझ नहीं पाया। कृपया फिर से प्रयास करें।",
+            'ar': "عذرًا، لم أفهم. حاول مرة أخرى.",
+            'en': "Sorry, I didn't understand. Please try again."
+          };
+          speakText(sorry[lang] || sorry['en']);
+        }
+      };
+      recognition.onerror = ()=> {
+        const lang = document.getElementById('lang-select').value;
+        let err = {
+          'urdu': "آواز کی شناخت میں خرابی۔",
+          'hi': "आवाज़ पहचानने में त्रुटि।",
+          'ar': "خطأ في التعرف على الصوت.",
+          'en': "Voice recognition error."
+        };
+        speakText(err[lang] || err['en']);
+      };
+      recognition.onend = ()=> { if(voiceModeOn) recognition.start(); } // auto-restart
+      recognition.start();
+    }
+
+    /* ================= SOS Function ================= */
+    function triggerSOS(){
+      const phone = prompt("Enter emergency phone number (with country code):", "+92300XXXXXXX");
+      if(!phone) return;
+      const payload = { phone: phone, message: "Emergency! Please help.", image_path: "static/file.jpg" };
+      fetch('/sos', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify(payload)
+      }).then(r => r.json()).then(res => {
+        if(res.status === 'sent' || res.status === 'logged') {
+          speakText('SOS request processed');
+          alert('SOS response: ' + (res.status || JSON.stringify(res)));
+        } else {
+          speakText('SOS failed');
+          alert('SOS failed: ' + JSON.stringify(res));
+        }
+      }).catch(e => {
+        console.error(e);
+        speakText('SOS request failed');
+        alert('SOS request failed');
+      });
+    }
+
+    // Helper: ask for user gesture to open file picker
+ function promptImagePicker() {
+  const lang = document.getElementById('lang-select').value;
+  let msg = {
+    'urdu': "براہ کرم تصویر منتخب کرنے کے لیے اسکرین پر ٹیپ کریں یا انٹر دبائیں۔",
+    'hi': "कृपया छवि चुनने के लिए स्क्रीन पर टैप करें या एंटर दबाएँ।",
+    'ar': "يرجى النقر على الشاشة أو الضغط على إدخال لاختيار صورة.",
+    'en': "Please tap the screen or press Enter to open the image picker."
+  };
+  speakText(msg[lang] || msg['en']);
+
+  // Directly open file input if browser allows
+  let fileInput = document.getElementById('file-upload');
+  if (fileInput) {
+    try { fileInput.click(); } 
+    catch(e) {
+      // fallback: wait for gesture
+      let label = document.querySelector('label[for="file-upload"]');
+      if (label) label.focus();
+      function handler(e) {
+        e.preventDefault();
+        fileInput.click();
+        window.removeEventListener('click', handler, true);
+        window.removeEventListener('keydown', keyHandler, true);
+      }
+      function keyHandler(e) { if (e.key === 'Enter') handler(e); }
+      window.addEventListener('click', handler, true);
+      window.addEventListener('keydown', keyHandler, true);
+    }
+  }
+}
+
+  </script>
+</body>
+</html>
